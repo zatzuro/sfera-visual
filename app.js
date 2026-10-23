@@ -468,13 +468,32 @@ function wb2PriorLabel_(t,rows){
 function wb2Value_(t,f,rows){
  return '<span class="wb2-num">'+money(t[f])+'</span>'+(f==="forecast"?'<small class="wb2-derived" title="Dato FC + Proyección + Próximo a salir; Plan de Acción excluido">Calculado · sin Plan</small>':f==="prior"?'<small class="wb2-comparable">'+esc(wb2PriorLabel_(t,rows))+' · '+money(t.forecast-t.prior)+'</small>':"");
 }
+function wb2KpiSourceFacts_(h,visibleRows){
+ const rows=h?.sourceResiduals||[],represented=new Set((visibleRows||[]).map(r=>String(r.key||"")));
+ const query=wbClientFilterKey_(workbenchClientFilter);
+ return rows.filter(r=>{
+  if(r.key&&represented.has(String(r.key)))return false;
+  if(query&&![r.unified,r.raw,r.holding,r.agency,r.negotiation].some(v=>wbClientFilterKey_(v).includes(query)))return false;
+  if(assocActive_()&&!["teamId","executiveId","clientId","clientRealId","medium","holding","agency","clientType"].every(k=>!assocSelections[k]?.length||assocSelections[k].some(v=>assocCanonicalValue_(k,v)===assocCanonicalValue_(k,r[k]))))return false;
+  return wb2Select_([r]).length>0;
+ });
+}
+function wb2KpiTotals_(source,h){
+ const rows=wb2Select_(source),sourceFacts=wb2KpiSourceFacts_(h,source);
+ const facts=rows.concat(sourceFacts);
+ const total=wb2Aggregate_(facts),radio=wb2Aggregate_(facts,"RADIO"),digital=wb2Aggregate_(facts,"DIGITAL");
+ const other=wb2Aggregate_(facts.filter(r=>!["RADIO","DIGITAL"].includes(wb2Medium_(r.medium))));
+ const withoutLine=wb2Aggregate_(sourceFacts);
+ return {total,radio,digital,other,withoutLine,sourceCount:sourceFacts.length};
+}
 function wb2Kpis_(source,h){
- const rows=wb2Select_(source),total=wb2Aggregate_(rows),partial=Boolean(wb2.medium||wb2.holding||wb2.agency||wb2.missing||workbenchClientFilter||assocActive_());
- if(!partial){const ex=(h.executives||[]).filter(x=>!wb2.exec||String(x.executiveId||"")===wb2.exec);total.budget=ex.reduce((n,x)=>n+num(x.totals?.budget),0);total.real=ex.reduce((n,x)=>n+num(x.totals?.real),0);}
- const digital=wb2Aggregate_(rows,"DIGITAL"),radio=wb2Aggregate_(rows,"RADIO");
- const card=(label,t)=>'<article class="wb2-kpi"><h3>'+label+'</h3>'+[['PPTO',money(t.budget)],['Cumpl. Real',t.budget?FMT_DEC1.format(t.real/t.budget*100)+"%":"Sin PPTO"],['Cumpl. Forecast',t.budget?FMT_DEC1.format(t.forecast/t.budget*100)+"%":"Sin PPTO"],['Forecast − Real',money(t.forecast-t.real)]].map(p=>'<div><span>'+p[0]+'</span><b>'+p[1]+'</b></div>').join("")+'</article>';
- const residual=total.budget-digital.budget-radio.budget;
- return '<div class="wb2-kpis">'+card("TOTAL",total)+card("DIGITAL",digital)+card("RADIO",radio)+'</div>'+(Math.abs(residual)>.01?'<p class="wb2-residual">PPTO residual / otros medios o sin atribución: '+money(residual)+'. No se redistribuye.</p>':"");
+ const {total,radio,digital,other,withoutLine,sourceCount}=wb2KpiTotals_(source,h);
+ const card=(label,t)=>'<article class="wb2-kpi"><h3>'+label+'</h3>'+[['PPTO',money(t.budget)],['Cumpl. Real',t.budget!==0?FMT_DEC1.format(t.real/t.budget*100)+"%":"Sin PPTO"],['Cumpl. Forecast',t.budget!==0?FMT_DEC1.format(t.forecast/t.budget*100)+"%":"Sin PPTO"],['Forecast − Real',money(t.forecast-t.real)]].map(p=>'<div><span>'+p[0]+'</span><b>'+p[1]+'</b></div>').join("")+'</article>';
+ const residual=['budget','real','forecast'].some(k=>Math.abs(num(other[k]))>.005);
+ const sourceOnly=sourceCount&&['budget','real'].some(k=>Math.abs(num(withoutLine[k]))>.005);
+ return '<div class="wb2-kpis">'+card("TOTAL",total)+card("DIGITAL",digital)+card("RADIO",radio)+'</div>'+
+  (residual?'<p class="wb2-residual">Residual identificado de otros medios o sin atribución: PPTO '+money(other.budget)+' · Real '+money(other.real)+' · Forecast '+money(other.forecast)+'. Incluido en TOTAL, no redistribuido.</p>':"")+
+  (sourceOnly?'<p class="wb2-residual">Fuentes comerciales sin línea editable o cliente especial ('+sourceCount+' registros): PPTO '+money(withoutLine.budget)+' · Real '+money(withoutLine.real)+'. Incluidas en sus medios identificados o en el residual sin medio; sin Forecast artificial.</p>':"");
 }
 function wb2Composition_(source){
  const s=wb2Aggregate_(wb2Select_(source)),fields=[["fc","Dato FC","wb2-fc"],["py","Proyección","wb2-py"],["pa","Próximo a salir","wb2-pa"]];
