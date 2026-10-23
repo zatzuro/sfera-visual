@@ -81,10 +81,10 @@ function cachedContextPayload_(view,period,stage){
 }
 function mergeDashboardData_(x){
  // Never install a server working snapshot obtained before a local edit/save.
- if(pendingWorking.size||autosaveInFlight||x._clientGeneration!==undefined&&x._clientGeneration!==editGeneration&&(!x.period||x.period===d.period)&&(!x.stage||x.stage===d.stage)&&(!x.teamId||x.teamId===d.teamId)){
+ if(pendingWorking.size||wb2MissingEdits.size||autosaveInFlight||x._clientGeneration!==undefined&&x._clientGeneration!==editGeneration&&(!x.period||x.period===d.period)&&(!x.stage||x.stage===d.stage)&&(!x.teamId||x.teamId===d.teamId)){
   x={...x};["working","workbenchHierarchy","workbenchHierarchyDeferred","summary"].forEach(k=>delete x[k]);
  }
- if(pendingWorking.size&&((x.period&&x.period!==d.period)||(x.teamId&&x.teamId!==d.teamId)||(x.stage&&x.stage!==d.stage)))return d;
+ if((pendingWorking.size||wb2MissingEdits.size)&&((x.period&&x.period!==d.period)||(x.teamId&&x.teamId!==d.teamId)||(x.stage&&x.stage!==d.stage)))return d;
  const oldAdmin=d.admin||{},oldAnalytics=d.analytics||{};d=Object.assign({},d,x);
  if(x.admin)d.admin=Object.assign({},oldAdmin,x.admin);if(x.analytics)d.analytics=Object.assign({},oldAnalytics,x.analytics);
  if(x.working)indexWorking_();return d;
@@ -166,15 +166,15 @@ function primaryViewNames_(){
 function idlePrefetch_(fn,delay){
  const epoch=viewEpoch,run=()=>{
   if(epoch!==viewEpoch||document.visibilityState!=="visible")return;
-  const busy=pendingWorking.size||autosaveInFlight||rpcActive||viewPromises.size||prefetchPromises.size||Date.now()-lastUserActivity<1200;
+  const busy=pendingWorking.size||wb2MissingEdits.size||autosaveInFlight||rpcActive||viewPromises.size||prefetchPromises.size||Date.now()-lastUserActivity<1200;
   if(busy){setTimeout(run,900);return}
-  if("requestIdleCallback" in window)requestIdleCallback(()=>{if(epoch===viewEpoch&&Date.now()-lastUserActivity>=1200&&!pendingWorking.size&&!autosaveInFlight&&!rpcActive&&!viewPromises.size&&!prefetchPromises.size)fn()},{timeout:1500});
+  if("requestIdleCallback" in window)requestIdleCallback(()=>{if(epoch===viewEpoch&&Date.now()-lastUserActivity>=1200&&!pendingWorking.size&&!wb2MissingEdits.size&&!autosaveInFlight&&!rpcActive&&!viewPromises.size&&!prefetchPromises.size)fn()},{timeout:1500});
   else fn();
  };
  setTimeout(run,delay);
 }
 function prefetchViews_(){
- if(d.demo||pendingWorking.size||autosaveInFlight||assocActive_())return;
+ if(d.demo||pendingWorking.size||wb2MissingEdits.size||autosaveInFlight||assocActive_())return;
  const needsSystem=d.role==="ad"||d.role==="dr"||d.mega,primaryReady=primaryViewNames_().every(name=>loadedViews.has(viewKey_(name,d.period,d.stage,"")));updatePrefetchReady_();
  if(!primaryReady)idlePrefetch_(()=>loadPrefetchGroup_("PRIMARY").catch(()=>{}),1200);
  if((d.role==="dr"||d.role==="ld"||d.role==="ad")&&!loadedViews.has(viewKey_("Cuadro Mensual",d.period,d.stage,"")))idlePrefetch_(()=>loadMonthlyWarm_().catch(()=>{}),2200);
@@ -201,13 +201,13 @@ function syncHeaderContext(x){
 function currentBogotaPeriod_(){const parts=FMT_BOGOTA_PARTS.formatToParts(new Date()),o={};parts.forEach(p=>{if(p.type!=="literal")o[p.type]=p.value});return String(o.year||"")+"-"+String(o.month||"")}
 function periodIsPast_(period){return /^\d{4}-\d{2}$/.test(String(period||""))&&String(period)<currentBogotaPeriod_()}
 async function changeTopContext_(period,stage){
- if(pendingWorking.size||autosaveInFlight||submitInFlight)return changeTopContext_Impl_(period,stage);
+ if(pendingWorking.size||wb2MissingEdits.size||autosaveInFlight||submitInFlight)return changeTopContext_Impl_(period,stage);
  contextLoads++;contextChanging=true;document.querySelectorAll(".edit").forEach(el=>el.disabled=true);
  try{return await changeTopContext_Impl_(period,stage);}
  finally{contextLoads--;contextChanging=contextLoads>0;document.querySelectorAll(".edit").forEach(el=>el.disabled=contextChanging);}
 }
 async function changeTopContext_Impl_(period,stage){
- if(savingDraft||submitInFlight||autosaveInFlight||pendingWorking.size){showNotice("Guarda los cambios pendientes antes de cambiar el contexto.");syncHeaderContext(d);return;}
+ if(savingDraft||submitInFlight||autosaveInFlight||pendingWorking.size||wb2MissingEdits.size){showNotice("Guarda los cambios pendientes antes de cambiar el contexto.");syncHeaderContext(d);return;}
  if(currentView==="Calendario")return loadCalendarContext(period,(calendarD||d).calendarTeamId||"");
  cacheCurrentDom_();const view=currentView||((d.role==="ld")?"Mesa de trabajo":(d.role==="vw"?"Resumen":(d.role==="dr"?"Resumen Nacional":"Información"))),cached=cachedContextPayload_(view,period,stage||"");
  clearViewCache_(true);const contextEpoch=viewEpoch;
@@ -224,7 +224,7 @@ function bindMenuToggle_(){
 function draw(){
  bindMenuToggle_();calendarD=null;if(d.demo)demoBar();else if(d.fullAccess||d.mega)megaBar();syncHeaderContext(d);renderCalendarAlert();
  const n=qs("#nav"),items=menus[d.role]||[];n.innerHTML="";const groups=new Map();items.forEach(name=>{const g=navGroup(name);if(!groups.has(g))groups.set(g,[]);groups.get(g).push(name)});let itemIndex=0,firstButton=null;
- groups.forEach((names,group)=>{const wrap=document.createElement("div");wrap.className="nav-chapter open";const head=document.createElement("button");head.type="button";head.className="nav-section nav-chapter-toggle";head.setAttribute("aria-expanded","true");head.innerHTML='<span>'+esc(group)+'</span><span class="nav-chevron">⌄</span>';const body=document.createElement("div");body.className="nav-chapter-items";head.onclick=()=>{const open=wrap.classList.toggle("open");head.setAttribute("aria-expanded",String(open))};wrap.appendChild(head);names.forEach(name=>{const i=itemIndex++,b=document.createElement("button");if(i===0)firstButton=b;b.innerHTML='<span class="nav-icon">'+navIcon(name)+'</span><span class="nav-text">'+esc(name)+'</span>';b.className=i?"":"active";b.onclick=()=>{if(hoverPrefetchTimer){clearTimeout(hoverPrefetchTimer);hoverPrefetchTimer=null}setMenuOpen_(false);render(name,b)};b.onmouseenter=()=>{if(d.demo)return;if(hoverPrefetchTimer)clearTimeout(hoverPrefetchTimer);hoverPrefetchTimer=setTimeout(()=>{hoverPrefetchTimer=null;if(currentView!==name&&!pendingWorking.size&&!autosaveInFlight)loadViewData_(name,{background:true}).catch(()=>{})},850)};b.onmouseleave=()=>{if(hoverPrefetchTimer){clearTimeout(hoverPrefetchTimer);hoverPrefetchTimer=null}};body.appendChild(b)});wrap.appendChild(body);n.appendChild(wrap)});
+ groups.forEach((names,group)=>{const wrap=document.createElement("div");wrap.className="nav-chapter open";const head=document.createElement("button");head.type="button";head.className="nav-section nav-chapter-toggle";head.setAttribute("aria-expanded","true");head.innerHTML='<span>'+esc(group)+'</span><span class="nav-chevron">⌄</span>';const body=document.createElement("div");body.className="nav-chapter-items";head.onclick=()=>{const open=wrap.classList.toggle("open");head.setAttribute("aria-expanded",String(open))};wrap.appendChild(head);names.forEach(name=>{const i=itemIndex++,b=document.createElement("button");if(i===0)firstButton=b;b.innerHTML='<span class="nav-icon">'+navIcon(name)+'</span><span class="nav-text">'+esc(name)+'</span>';b.className=i?"":"active";b.onclick=()=>{if(hoverPrefetchTimer){clearTimeout(hoverPrefetchTimer);hoverPrefetchTimer=null}setMenuOpen_(false);render(name,b)};b.onmouseenter=()=>{if(d.demo)return;if(hoverPrefetchTimer)clearTimeout(hoverPrefetchTimer);hoverPrefetchTimer=setTimeout(()=>{hoverPrefetchTimer=null;if(currentView!==name&&!pendingWorking.size&&!wb2MissingEdits.size&&!autosaveInFlight)loadViewData_(name,{background:true}).catch(()=>{})},850)};b.onmouseleave=()=>{if(hoverPrefetchTimer){clearTimeout(hoverPrefetchTimer);hoverPrefetchTimer=null}};body.appendChild(b)});wrap.appendChild(body);n.appendChild(wrap)});
  const firstName=items[0]||"Resumen";render(firstName,firstButton);if(token&&!d.demo)assocRefresh_();
 }
 function stageHuman(stage){return ({LATEST:"Última publicación por equipo",ARR:"Arranque",W1:"Semana 1",W2:"Semana 2",W3:"Semana 3",W4:"Semana 4",W5:"Semana 5",PRE:"Precierre",CLS:"Cierre"})[String(stage||"").toUpperCase()]||String(stage||"")}
@@ -238,7 +238,7 @@ function assocStageCoverageBadge_(){
  (c.details?.length?'<small>'+esc(c.details.map(x=>x.name+" ("+stageHuman(x.stage)+")").join(" · "))+'</small>':'')+
  (c.missing?.length?'<small>Sin fotografía en esta etapa: '+esc(c.missing.map(x=>x.name).join(", "))+'</small>':'')+
  (c.comparison?'<small>Comparación '+esc(stageHuman(c.comparison.previousStage))+' → '+esc(stageHuman(c.stage))+' sobre '+c.comparison.commonTeams.length+' equipos comunes: '+signedMoney(c.comparison.delta)+(c.comparison.homogeneous?' · cobertura comparable':' · cobertura distinta: no interpretar como caída global')+'</small>':'');
- const refresh=qs("#refreshStageCoverage");if(refresh)refresh.onclick=async()=>{if(pendingWorking.size||autosaveInFlight||submitInFlight)return showNotice("Guarda primero los cambios de Mesa.");const period=d.period,stage=d.stage,view=currentView;clearViewCache_(false);const x=await gasGet("dashboard",{period,stage,view});if(!x.ok)return showNotice(x.error||"No se pudo consultar publicaciones");if(period!==d.period||view!==currentView)return;mergeDashboardData_(x);syncHeaderContext(d);renderView_(view);showNotice("Publicaciones oficiales actualizadas");};
+ const refresh=qs("#refreshStageCoverage");if(refresh)refresh.onclick=async()=>{if(pendingWorking.size||wb2MissingEdits.size||autosaveInFlight||submitInFlight)return showNotice("Guarda primero los cambios de Mesa.");const period=d.period,stage=d.stage,view=currentView;clearViewCache_(false);const x=await gasGet("dashboard",{period,stage,view});if(!x.ok)return showNotice(x.error||"No se pudo consultar publicaciones");if(period!==d.period||view!==currentView)return;mergeDashboardData_(x);syncHeaderContext(d);renderView_(view);showNotice("Publicaciones oficiales actualizadas");};
 }
 function renderCalendarAlert(){const el=qs("#calendarAlert");if(!el)return;if(currentView==="Cuadro Mensual"||currentView==="Cuadro Global"){el.innerHTML="";return}const a=d.calendarAlert;if(!a){el.innerHTML="";return}el.innerHTML='<div class="calendar-alert '+esc(a.kind||"")+'"><div><strong>'+esc(a.title||"Calendario")+'</strong><span>'+esc(a.message||"")+'</span></div><div><b>'+esc(a.dueAt?formatCalendarDate(a.dueAt):"")+'</b></div></div>'}
 function bogotaParts(v){
@@ -261,7 +261,7 @@ function demoBar(){
 function render(name,b){
  if(savingDraft)return;
  if(name==="Mesa de trabajo"&&d.role==="ld"&&mesaOperationalPeriod&&d.period!==mesaOperationalPeriod){
-  if(pendingWorking.size||autosaveInFlight||submitInFlight)return showNotice("No se cambia el periodo de Mesa con operaciones pendientes; guarda primero.");
+  if(pendingWorking.size||wb2MissingEdits.size||autosaveInFlight||submitInFlight)return showNotice("No se cambia el periodo de Mesa con operaciones pendientes; guarda primero.");
   currentView=name;qs("#title").textContent=name;changeTopContext_(mesaOperationalPeriod,"").then(()=>{assocRenderBar_();}).catch(e=>showNotice(e.message||"No se pudo recuperar Mesa Viva"));return;
  }
  document.body.classList.toggle("mm-view",name==="Cuadro Mensual");const navStarted=performance.now(),previous=currentView;if(previous&&previous!==name)cacheCurrentDom_();[...qs("#nav").children].forEach(x=>x.classList.remove("active"));b?.classList.add("active");qs("#title").textContent=name;currentView=name;syncHeaderContext(d);renderCalendarAlert();assocRenderBar_();
@@ -419,6 +419,7 @@ function warmClientIdentitySearch_(){
 /* Mesa 2.0 — presentation only: each edit retains its original rowKey. */
 /* Mesa 2.0.1: consolidation is a presentation, not a migration of rowKeys. */
 const wb2={exec:"",medium:"",holding:"",agency:"",page:0,expanded:new Set(["forecast","prior"]),expandedClients:new Set(),notices:false,advanced:false,missing:false,returnContext:null,editor:null,picker:null,deltaEdits:new Map(),deltaSequence:0};
+const wb2MissingEdits=new Map();let wb2MissingRevision=0;
 let wb2Bound=false;
 const wb2Metrics=[["real","Dato Real"],["forecast","Forecast"],["fc","Dato FC"],["py","Proyección"],["pa","Próximo a salir"],["pl","Plan de Acción"],["prior","Año-1"]];
 function wb2PriorYearLabel_(h,year){const periodYear=Number(String(d.period||"").match(/^(\d{4})/)?.[1]);if(Number.isInteger(periodYear)&&periodYear>0)return String(periodYear-1);const fallback=Number(h?.priorYear||year);return Number.isInteger(fallback)&&fallback>0?String(fallback):"Año-1";}
@@ -430,7 +431,7 @@ function wb2GroupKey_(r){
  return JSON.stringify([String(r.teamId||d.teamId||""),String(r.clientId||"")||"UNKNOWN:"+String(r.key||""),realId,String(r.executiveId||"")||wb2DimensionKey_(r.executive),String(r.agencyId||"")||wb2DimensionKey_(r.agency),String(r.holdingId||"")||wb2DimensionKey_(r.holding),String(r.negotiationId||"")||wb2DimensionKey_(r.negotiation)]);
 }
 function wb2GroupRows_(key){
- return wb2Select_(wb2Data_(d.workbenchHierarchy,workbenchClientFilter).rows).filter(r=>wb2GroupKey_(r)===key);
+ return wb2VisibleRows_(wb2Data_(d.workbenchHierarchy,workbenchClientFilter).rows).filter(r=>wb2GroupKey_(r)===key);
 }
 function wb2ColumnCount_(){return 4+wb2Metrics.reduce((n,[f])=>n+(wb2.expanded.has(f)?3:1),0);}
 
@@ -455,7 +456,16 @@ function wb2Data_(h,q){
  return {h:filtered,rows:qnorm?rows.filter(r=>[r.unified,r.raw,r.holding,r.agency,r.negotiation,...r.aliases].some(v=>wbClientFilterKey_(v).includes(qnorm))):rows};
 }
 function wb2HasDiligence_(rows){return rows.some(r=>["PENDING","UNTOUCHED","CONFIRMED","DONE","EDITED"].includes(r.diligenceStatus));}
-function wb2Select_(rows){return rows.filter(r=>(!wb2.exec||r.executiveId===wb2.exec)&&(!wb2.medium||wb2Medium_(r.medium)===wb2.medium)&&(!wb2.holding||r.holding===wb2.holding)&&(!wb2.agency||r.agency===wb2.agency)&&(!wb2.missing||["PENDING","UNTOUCHED"].includes(r.diligenceStatus)));}
+function wb2MatchesFilters_(r,includeMedium=true){return (!wb2.exec||r.executiveId===wb2.exec)&&(!includeMedium||!wb2.medium||wb2Medium_(r.medium)===wb2.medium)&&(!wb2.holding||r.holding===wb2.holding)&&(!wb2.agency||r.agency===wb2.agency)&&(!wb2.missing||["PENDING","UNTOUCHED"].includes(r.diligenceStatus));}
+function wb2Select_(rows){return rows.filter(r=>wb2MatchesFilters_(r));}
+// Keep clients without the selected medium visible for inline entry. These anchor
+// rows are never included in medium-scoped KPI calculations (wb2Select_).
+function wb2VisibleRows_(rows){
+ const selected=wb2Select_(rows);
+ if(!["RADIO","DIGITAL"].includes(wb2.medium))return selected;
+ const found=new Set(selected.map(wb2GroupKey_));
+ return selected.concat(rows.filter(r=>wb2MatchesFilters_(r,false)&&!found.has(wb2GroupKey_(r))));
+}
 function wb2Aggregate_(rows,medium){const t={real:0,budget:0,prior:0,fc:0,py:0,pa:0,pl:0};rows.forEach(r=>{if(medium&&wb2Medium_(r.medium)!==medium)return;Object.keys(t).forEach(f=>t[f]+=num(r[f]));});t.forecast=t.fc+t.py+t.pa;return t;}
 function wb2PriorLabel_(t,rows){
  const forecast=t.fc+t.py+t.pa,prior=t.prior;
@@ -468,16 +478,44 @@ function wb2PriorLabel_(t,rows){
 function wb2Value_(t,f,rows){
  return '<span class="wb2-num">'+money(t[f])+'</span>'+(f==="forecast"?'<small class="wb2-derived" title="Dato FC + Proyección + Próximo a salir; Plan de Acción excluido">Calculado · sin Plan</small>':f==="prior"?'<small class="wb2-comparable">'+esc(wb2PriorLabel_(t,rows))+' · '+money(t.forecast-t.prior)+'</small>':"");
 }
+function wb2KpiSourceFacts_(h,visibleRows){
+ const rows=h?.sourceResiduals||[],represented=new Set((visibleRows||[]).map(r=>String(r.key||"")));
+ const query=wbClientFilterKey_(workbenchClientFilter);
+ return rows.filter(r=>{
+  if(r.key&&represented.has(String(r.key)))return false;
+  if(query&&![r.unified,r.raw,r.holding,r.agency,r.negotiation].some(v=>wbClientFilterKey_(v).includes(query)))return false;
+  if(assocActive_()&&!["teamId","executiveId","clientId","clientRealId","medium","holding","agency","clientType"].every(k=>!assocSelections[k]?.length||assocSelections[k].some(v=>assocCanonicalValue_(k,v)===assocCanonicalValue_(k,r[k]))))return false;
+  return wb2Select_([r]).length>0;
+ });
+}
+function wb2PendingMediaRows_(source){
+ const pending=[];
+ wb2MissingEdits.forEach(edit=>{
+  const origin=(source||[]).find(r=>wb2GroupKey_(r)===edit.group);if(!origin)return;
+  const row={...origin,key:"",medium:edit.medium==="RADIO"?"Radio":"Digital",real:0,budget:0,prior:0,fc:0,py:0,pa:0,pl:0,pendingMissingMedium:true,...edit.values};
+  if(wb2MatchesFilters_(row))pending.push(row);
+ });
+ return pending;
+}
+function wb2KpiTotals_(source,h){
+ const rows=wb2Select_(source).concat(wb2PendingMediaRows_(source)),sourceFacts=wb2KpiSourceFacts_(h,source);
+ const facts=rows.concat(sourceFacts);
+ const total=wb2Aggregate_(facts),radio=wb2Aggregate_(facts,"RADIO"),digital=wb2Aggregate_(facts,"DIGITAL");
+ const other=wb2Aggregate_(facts.filter(r=>!["RADIO","DIGITAL"].includes(wb2Medium_(r.medium))));
+ const withoutLine=wb2Aggregate_(sourceFacts);
+ return {total,radio,digital,other,withoutLine,sourceCount:sourceFacts.length};
+}
 function wb2Kpis_(source,h){
- const rows=wb2Select_(source),total=wb2Aggregate_(rows),partial=Boolean(wb2.medium||wb2.holding||wb2.agency||wb2.missing||workbenchClientFilter||assocActive_());
- if(!partial){const ex=(h.executives||[]).filter(x=>!wb2.exec||String(x.executiveId||"")===wb2.exec);total.budget=ex.reduce((n,x)=>n+num(x.totals?.budget),0);total.real=ex.reduce((n,x)=>n+num(x.totals?.real),0);}
- const digital=wb2Aggregate_(rows,"DIGITAL"),radio=wb2Aggregate_(rows,"RADIO");
- const card=(label,t)=>'<article class="wb2-kpi"><h3>'+label+'</h3>'+[['PPTO',money(t.budget)],['Cumpl. Real',t.budget?FMT_DEC1.format(t.real/t.budget*100)+"%":"Sin PPTO"],['Cumpl. Forecast',t.budget?FMT_DEC1.format(t.forecast/t.budget*100)+"%":"Sin PPTO"],['Forecast − Real',money(t.forecast-t.real)]].map(p=>'<div><span>'+p[0]+'</span><b>'+p[1]+'</b></div>').join("")+'</article>';
- const residual=total.budget-digital.budget-radio.budget;
- return '<div class="wb2-kpis">'+card("TOTAL",total)+card("DIGITAL",digital)+card("RADIO",radio)+'</div>'+(Math.abs(residual)>.01?'<p class="wb2-residual">PPTO residual / otros medios o sin atribución: '+money(residual)+'. No se redistribuye.</p>':"");
+ const {total,radio,digital,other,withoutLine,sourceCount}=wb2KpiTotals_(source,h);
+ const card=(label,t)=>'<article class="wb2-kpi"><h3>'+label+'</h3>'+[['PPTO',money(t.budget)],['Cumpl. Real',t.budget!==0?FMT_DEC1.format(t.real/t.budget*100)+"%":"Sin PPTO"],['Cumpl. Forecast',t.budget!==0?FMT_DEC1.format(t.forecast/t.budget*100)+"%":"Sin PPTO"],['Forecast − Real',money(t.forecast-t.real)]].map(p=>'<div><span>'+p[0]+'</span><b>'+p[1]+'</b></div>').join("")+'</article>';
+ const residual=['budget','real','forecast'].some(k=>Math.abs(num(other[k]))>.005);
+ const sourceOnly=sourceCount&&['budget','real'].some(k=>Math.abs(num(withoutLine[k]))>.005);
+ return '<div class="wb2-kpis">'+card("TOTAL",total)+card("DIGITAL",digital)+card("RADIO",radio)+'</div>'+
+  (residual?'<p class="wb2-residual">Residual identificado de otros medios o sin atribución: PPTO '+money(other.budget)+' · Real '+money(other.real)+' · Forecast '+money(other.forecast)+'. Incluido en TOTAL, no redistribuido.</p>':"")+
+  (sourceOnly?'<p class="wb2-residual">Fuentes comerciales sin línea editable o cliente especial ('+sourceCount+' registros): PPTO '+money(withoutLine.budget)+' · Real '+money(withoutLine.real)+'. Incluidas en sus medios identificados o en el residual sin medio; sin Forecast artificial.</p>':"");
 }
 function wb2Composition_(source){
- const s=wb2Aggregate_(wb2Select_(source)),fields=[["fc","Dato FC","wb2-fc"],["py","Proyección","wb2-py"],["pa","Próximo a salir","wb2-pa"]];
+ const s=wb2Aggregate_(wb2Select_(source).concat(wb2PendingMediaRows_(source))),fields=[["fc","Dato FC","wb2-fc"],["py","Proyección","wb2-py"],["pa","Próximo a salir","wb2-pa"]];
  const stable=s.forecast>0&&fields.every(([f])=>s[f]>=0),pct=n=>stable?FMT_DEC1.format(n/s.forecast*100)+"%":"No comparable";
  const segments=stable?'<div class="wb2-comp-bar" role="img" aria-label="Composición del Total Forecast">'+fields.filter(([f])=>s[f]>0).map(([f,n,c])=>'<span class="'+c+'" style="width:'+Math.max(0,Math.min(100,s[f]/s.forecast*100))+'%" title="'+esc(n)+': '+pct(s[f])+'"></span>').join("")+'</div>':'<p class="wb2-comp-warning">Composición con importes negativos o total no positivo: los porcentajes de participación no son comparables.</p>';
  return '<section class="wb2-comp" aria-label="Composición del Forecast"><div class="wb2-comp-heading"><strong>Composición del Forecast</strong><b>'+money(s.forecast)+'</b></div>'+segments+'<div class="wb2-comp-legend">'+fields.map(([f,n,c])=>'<div><i class="'+c+'"></i><span>'+n+'</span><b>'+money(s[f])+'</b><small>'+pct(s[f])+'</small></div>').join("")+'</div><p class="wb2-comp-plan">Plan de Acción: <strong>'+money(s.pl)+'</strong> (no se suma al Total Forecast).</p></section>';
@@ -491,22 +529,36 @@ function wb2DeltaSelectorMarkup_(id,edit,rows){
  const options=rows.map(r=>'<option value="'+esc(r.key)+'" '+(edit.selectedKey===r.key?"selected":"")+'>'+esc(r.medium+' · '+r.executive+' · '+(r.negotiation||"Normal")+' · '+(r.agency||"Sin agencia")+' · '+r.raw)+'</option>').join("");
  return '<div class="wb2-delta-selector" data-wb2-delta-selector="'+esc(id)+'"><small>Variación '+signedMoney(edit.draft-edit.previous)+' · Total resultante '+money(edit.draft)+'</small><label>Aplicar diferencia a una línea autorizada<select data-wb2-delta-choice="'+esc(id)+'"><option value="">Selecciona la línea origen…</option>'+options+'</select></label><div><button type="button" class="action primary" data-wb2-delta-apply="'+esc(id)+'" '+(edit.selectedKey?'':'disabled')+'>Aplicar cambio</button><button type="button" class="action" data-wb2-delta-cancel="'+esc(id)+'">Cancelar</button></div><small class="wb2-delta-error" aria-live="polite"></small></div>';
 }
+
+function wb2MissingKey_(group,medium){return JSON.stringify([group,medium]);}
+function wb2MissingInput_(input,value){
+ if(d.role!=="ld"||!d.stageEditable||submitInFlight||contextChanging)return;
+ const group=input.dataset.wb2Missing,medium=input.dataset.wb2MissingMedium,field=input.dataset.field;
+ if(!["RADIO","DIGITAL"].includes(medium)||!["fc","py","pa","pl"].includes(field))return;
+ const source=wb2GroupRows_(group);if(!source.length||source.some(r=>wb2Medium_(r.medium)===medium))return;
+ const key=wb2MissingKey_(group,medium),old=wb2MissingEdits.get(key);
+ const edit=old||{key,group,medium,originRowKey:source[0].key,period:d.period,stage:d.stage,values:{},revision:0};
+ edit.values[field]=value;edit.requestId=null;edit.revision=++wb2MissingRevision;wb2MissingEdits.set(key,edit);
+ editGeneration++;input.classList.add("dirty");updateDirtyBanner_();wb2Recalc_();scheduleAutosave_(1000);
+}
 function wb2Cell_(set,field,medium,isClientOrLine){
  const candidates=medium?set.filter(r=>wb2Medium_(r.medium)===medium):set;
  const totals=wb2Aggregate_(candidates),group=wb2GroupKey_(candidates[0]||set[0]||{}),id=wb2CellId_(group,field,medium);
- const writeField=["fc","py","pa","pl"].includes(field);
- const editable=Boolean(isClientOrLine&&d.stageEditable&&d.role==="ld"&&candidates.length&&writeField);
- const mayCreate=Boolean(isClientOrLine&&d.stageEditable&&d.role==="ld"&&set.length&&!candidates.length&&["RADIO","DIGITAL"].includes(medium)&&writeField);
- const color=wb2ColorClass_(field),meta=' class="wb2-cell '+color+'" data-wb2-f="'+esc(field)+'" data-wb2-m="'+esc(medium)+'"';
- if(editable){
+ const writable=["fc","py","pa","pl"].includes(field)&&isClientOrLine&&d.stageEditable&&d.role==="ld";
+ const missing=writable&&set.length&&!candidates.length&&["RADIO","DIGITAL"].includes(medium);
+ const meta=' class="wb2-cell '+wb2ColorClass_(field)+(missing?' wb2-edit wb2-edit-missing':'')+'" data-wb2-f="'+esc(field)+'" data-wb2-m="'+esc(medium)+'"';
+ if(writable&&(missing||candidates.length)){
+  if(missing){
+   const draft=wb2MissingEdits.get(wb2MissingKey_(group,medium)),changed=draft&&Object.prototype.hasOwnProperty.call(draft.values,field),value=changed?draft.values[field]:0;
+   return '<td'+meta+'><input class="edit'+(changed?" dirty":"")+'" data-wb2-missing="'+esc(group)+'" data-wb2-missing-medium="'+esc(medium)+'" data-field="'+field+'" inputmode="numeric" autocomplete="off" aria-label="'+esc(field+" "+set[0].raw+" "+medium)+'" value="'+wbFormatMoneyInput_(value)+'"></td>';
+  }
   let cellEdit=wb2.deltaEdits.get(id);
   if(cellEdit&&(cellEdit.period!==d.period||cellEdit.stage!==d.stage||cellEdit.keys.length!==candidates.length||candidates.some(r=>!cellEdit.keys.includes(r.key)||(workingRevision.get(r.key)||0)!==cellEdit.revisions.get(r.key)))){wb2.deltaEdits.delete(id);cellEdit=null;}
   const value=cellEdit?cellEdit.draft:totals[field],multiple=candidates.length>1;
-  const input='<input class="edit'+(candidates.some(r=>pendingWorking.has(r.key))?" dirty":"")+'" '+(multiple?'data-wb2-delta="'+esc(id)+'" data-wb2-total="'+esc(totals[field])+'"':'data-rows="'+esc(candidates[0].key)+'"')+' data-field="'+field+'" inputmode="numeric" autocomplete="off" aria-label="'+esc(field+" "+candidates[0].raw+" "+(medium||"Total")+' · importe consolidado')+'" value="'+wbFormatMoneyInput_(value)+'">';
+  const input='<input class="edit'+(candidates.some(r=>pendingWorking.has(r.key))?" dirty":"")+'" '+(multiple?'data-wb2-delta="'+esc(id)+'" data-wb2-total="'+esc(totals[field])+'"':'data-rows="'+esc(candidates[0].key)+'"')+' data-field="'+field+'" inputmode="numeric" autocomplete="off" aria-label="'+esc(field+" "+candidates[0].raw+" "+(medium||"Total"))+'" value="'+wbFormatMoneyInput_(value)+'">';
   return '<td class="wb2-edit'+(multiple?' wb2-edit-multiple':'')+'"'+meta+'>'+input+(cellEdit?wb2DeltaSelectorMarkup_(id,cellEdit,candidates):"")+'</td>';
  }
- const action=mayCreate?'<button type="button" class="action wb2-create-medium" data-wb2-create="'+esc(group)+'" data-wb2-create-medium="'+esc(medium)+'" aria-label="Crear línea '+esc(medium)+' para diligenciar '+esc(field)+'">+ Crear línea '+esc(medium)+'</button>':"";
- return '<td'+meta+'>'+wb2Value_(totals,field,candidates)+action+(!candidates.length&&!mayCreate&&medium&&writeField?'<small class="wb2-no-source">Sin origen '+esc(medium)+' · '+(d.stageEditable?"sin permiso para crear":"etapa de solo lectura")+'</small>':"")+'</td>';
+ return '<td'+meta+'>'+wb2Value_(totals,field,candidates)+(!candidates.length&&medium&&["fc","py","pa","pl"].includes(field)?'<small class="wb2-no-source">Sin origen '+esc(medium)+' · solo lectura</small>':"")+'</td>';
 }
 function wb2ReadCell_(set,field,medium){
  return wb2Cell_(set,field,medium,true).replace(/^<td[^>]*>|<\/td>$/g,"");
@@ -555,7 +607,7 @@ function wb2Alerts_(rows){
 }
 function wb2Options_(values,current,label){return '<option value="">'+esc(label)+'</option>'+[...new Set(values.filter(Boolean))].sort((a,b)=>a.localeCompare(b,"es")).map(v=>'<option value="'+esc(v)+'" '+(v===current?"selected":"")+'>'+esc(v)+'</option>').join("");}
 function wb2View_(h,year,q){
- const source=wb2Data_(h,q),all=source.rows,rows=wb2Select_(all),clients=new Map();
+ const source=wb2Data_(h,q),all=source.rows,rows=wb2VisibleRows_(all),clients=new Map();
  rows.forEach(r=>{const key=wb2GroupKey_(r);if(!clients.has(key))clients.set(key,{key,name:r.raw,rows:[]});clients.get(key).rows.push(r);});
  const groups=[...clients.values()],max=Math.max(1,Math.ceil(groups.length/75));wb2.page=Math.max(0,Math.min(wb2.page,max-1));
  const body=groups.slice(wb2.page*75,(wb2.page+1)*75).map(g=>wb2Row_("client",g.rows,g.name)).join("");
@@ -589,7 +641,7 @@ function wb2Refresh_(){
 }
 function wb2Recalc_(){
  if(!d.workbenchHierarchy)return;
- const source=wb2Data_(d.workbenchHierarchy,workbenchClientFilter),rows=wb2Select_(source.rows);
+ const source=wb2Data_(d.workbenchHierarchy,workbenchClientFilter),rows=wb2VisibleRows_(source.rows);
  const kpi=qs("#wb2Kpis"),comp=qs("#wb2Composition");
  if(kpi)kpi.innerHTML=wb2Kpis_(source.rows,source.h);
  if(comp)comp.innerHTML=wb2Composition_(source.rows);
@@ -598,7 +650,7 @@ function wb2Recalc_(){
   const group=groups.get(tr.dataset.wb2Group)||[],one=tr.dataset.wb2Key?group.filter(r=>r.key===tr.dataset.wb2Key):group;
   tr.querySelectorAll("td[data-wb2-f]").forEach(td=>{
    const field=td.dataset.wb2F,medium=td.dataset.wb2M||"",input=td.querySelector("input.edit");
-   if(input){if(input.hasAttribute("data-wb2-delta")){const totals=wb2Aggregate_(one,medium);if(document.activeElement!==input&&!wb2.deltaEdits.has(input.dataset.wb2Delta))input.value=wbFormatMoneyInput_(totals[field]);return;}const row=rows.find(r=>r.key===input.dataset.rows);if(row&&document.activeElement!==input)input.value=wbFormatMoneyInput_(row[field]);return;}
+   if(input){if(input.hasAttribute("data-wb2-missing"))return;if(input.hasAttribute("data-wb2-delta")){const totals=wb2Aggregate_(one,medium);if(document.activeElement!==input&&!wb2.deltaEdits.has(input.dataset.wb2Delta))input.value=wbFormatMoneyInput_(totals[field]);return;}const row=rows.find(r=>r.key===input.dataset.rows);if(row&&document.activeElement!==input)input.value=wbFormatMoneyInput_(row[field]);return;}
    td.innerHTML=wb2ReadCell_(one,field,medium);
   });
  });
@@ -717,8 +769,7 @@ function wb2Bind_(){
    return;
   }
   const save=e.target.closest("[data-wb2-editor-save]");
-  if(save){save.disabled=true;try{await saveDraft();const status=qs(".wb2-editor-status");if(status)status.textContent=pendingWorking.size?"Quedan líneas sin guardar. Revisa los errores y reintenta.":"Cambios guardados correctamente.";}finally{if(save.isConnected)save.disabled=false;}return;}
-  const create=e.target.closest("[data-wb2-create]");if(create){if(d.role!=="ld"||!d.stageEditable)return showNotice("Sin permiso de creación o etapa cerrada.");const medium=create.dataset.wb2CreateMedium;if(!["RADIO","DIGITAL"].includes(medium))return showNotice("Medio inválido.");wb2OriginOpen_(create.dataset.wb2Create,"create:"+medium);return;}
+  if(save){save.disabled=true;try{await saveDraft();const status=qs(".wb2-editor-status");if(status)status.textContent=(pendingWorking.size||wb2MissingEdits.size)?"Quedan líneas sin guardar. Revisa los errores y reintenta.":"Cambios guardados correctamente.";}finally{if(save.isConnected)save.disabled=false;}return;}
   const origin=e.target.closest("[data-wb2-origin]");if(origin){wb2OriginOpen_(origin.dataset.wb2Origin,origin.dataset.wb2Kind);return;}
   const picked=e.target.closest("[data-wb2-picked]");if(picked){const group=wb2.picker?.group;if(group)wb2SourceAction_(picked.dataset.wb2Picked,picked.dataset.wb2Kind,group);return;}
   if(e.target.closest("[data-wb2-close-picker]")){wb2.picker=null;wb2Refresh_();return;}
@@ -749,7 +800,7 @@ function workbench(){
  const wm=qs("#workbenchMonth"),cf=qs("#workbenchClientFilter");if(wm)wm.onchange=()=>loadWorkbenchContext(wm.value,"");if(cf)cf.oninput=()=>{workbenchClientFilter=cf.value||"";renderWorkbenchClientFilter_();};updateDirtyBanner_();
  wb2Bind_();if(wb2.advanced&&!loading)wb2Advanced_();if(loading)loadWorkbenchDetail_();warmClientIdentitySearch_();const nc=qs("#negCreateTop");if(nc)nc.onclick=()=>negCreateLabel_();const reopen=qs("#requestReopen");if(reopen)reopen.onclick=()=>requestStageReopen_();
 }
-function updateDirtyBanner_(){const el=qs("#dirtyCount");if(!el)return;const n=pendingWorking.size;if(autosaveInFlight)el.textContent="Guardando…"+(n?" · "+n+" pendiente"+(n===1?"":"s"):"");else if(autosaveError&&n)el.textContent=n+" pendiente"+(n===1?"":"s")+" · "+(removedWorking.size?"error de portafolio":autosaveFailures>=3?"error · pulsa Guardar": "error · reintento con espera");else el.textContent=n?n+" línea"+(n===1?"":"s")+" pendiente"+(n===1?"":"s")+" de guardar":"Guardado ✓";el.classList.toggle("has-changes",n>0||Boolean(autosaveError));}
+function updateDirtyBanner_(){const el=qs("#dirtyCount");if(!el)return;const n=pendingWorking.size+wb2MissingEdits.size;if(autosaveInFlight)el.textContent="Guardando…"+(n?" · "+n+" pendiente"+(n===1?"":"s"):"");else if(autosaveError&&n)el.textContent=n+" pendiente"+(n===1?"":"s")+" · "+(removedWorking.size?"error de portafolio":autosaveFailures>=3?"error · pulsa Guardar": "error · reintento con espera");else el.textContent=n?n+" línea"+(n===1?"":"s")+" pendiente"+(n===1?"":"s")+" de guardar":"Guardado ✓";el.classList.toggle("has-changes",n>0||Boolean(autosaveError));}
 
 async function requestStageReopen_(){
  const form=await openSferaForm({title:"Solicitar reapertura",subtitle:d.period+" · "+stageHuman(d.stage),submitLabel:"Enviar solicitud",note:"La etapa seguirá en solo lectura hasta aprobación de Dirección/Mega.",fields:[{name:"reason",label:"Motivo",type:"textarea",required:true,full:true}]});if(!form||!String(form.reason||"").trim())return;const r=await gasPost("requestReopen",{period:d.period,stage:d.stage,reason:String(form.reason).trim()});if(!r.ok)return showNotice("No fue posible solicitar: "+(r.error||"error"));d.reopenRequests=[...(d.reopenRequests||[]),{id:r.requestId,periodId:d.period,teamId:d.teamId,stage:d.stage,status:"PENDING",reason:String(form.reason).trim()}];invalidateViews_(["Mesa de trabajo","Calendario"]);loadedViews.add(viewKey_("Mesa de trabajo",d.period,d.stage,""));workbench();showNotice("Solicitud enviada. La etapa sigue en solo lectura.");loadWorkbenchContext(d.period,d.stage).catch(()=>{});
@@ -1112,13 +1163,13 @@ async function refreshDashboard(view){
  const target=view||currentView||"AUTO",x=await gasGet("dashboard",{period:d.period,stage:d.stage||"",view:target});if(x.ok){rememberContextPayload_(x.viewLoaded||target,x);mergeDashboardData_(x);if(x.viewLoaded)loadedViews.add(viewKey_(x.viewLoaded,x.period,x.stage,""));syncHeaderContext(d);renderCalendarAlert()}return x;
 }
 async function loadWorkbenchContext(period,stage){
- if(pendingWorking.size||autosaveInFlight||submitInFlight)return loadWorkbenchContextImpl_(period,stage);
+ if(pendingWorking.size||wb2MissingEdits.size||autosaveInFlight||submitInFlight)return loadWorkbenchContextImpl_(period,stage);
  contextLoads++;contextChanging=true;document.querySelectorAll(".edit").forEach(el=>el.disabled=true);
  try{return await loadWorkbenchContextImpl_(period,stage);}
  finally{contextLoads--;contextChanging=contextLoads>0;document.querySelectorAll(".edit").forEach(el=>el.disabled=contextChanging);}
 }
 async function loadWorkbenchContextImpl_(period,stage){
- if(savingDraft||submitInFlight||autosaveInFlight||pendingWorking.size){showNotice("Guarda los cambios pendientes antes de cambiar el contexto.");syncHeaderContext(d);const month=qs("#workbenchMonth"),selected=qs("#workbenchStage");if(month)month.value=d.period;if(selected)selected.value=d.stage;return;}
+ if(savingDraft||submitInFlight||autosaveInFlight||pendingWorking.size||wb2MissingEdits.size){showNotice("Guarda los cambios pendientes antes de cambiar el contexto.");syncHeaderContext(d);const month=qs("#workbenchMonth"),selected=qs("#workbenchStage");if(month)month.value=d.period;if(selected)selected.value=d.stage;return;}
  cacheCurrentDom_();const cached=cachedContextPayload_("Mesa de trabajo",period,stage||"");clearViewCache_(true);const contextEpoch=viewEpoch;
  if(cached){mergeDashboardData_(cached);delete d.previousOfficial;if(cached.working)indexWorking_();loadedViews.add(viewKey_("Mesa de trabajo",cached.period,cached.stage,""));syncHeaderContext(d);renderCalendarAlert();if(!restoreDom_("Mesa de trabajo"))workbench();prefetchViews_();return;}
  const x=await gasGet("dashboard",{period:period,stage:stage||"",view:"Mesa de trabajo"});if(contextEpoch!==viewEpoch)return;if(!x.ok)return showNotice("No fue posible abrir la Mesa: "+(x.error||"error"));
@@ -1178,10 +1229,10 @@ function wbApplyValue_(keys,field,value){
  [d.summary?.national,...(d.summary?.teams||[]).filter(t=>t.teamId===d.teamId)].filter(Boolean).forEach(t=>{t[field]=num(t[field])+delta;wbRefreshTotals_(t);t.forecastVsBudget=t.forecast-num(t.budget);t.forecastVsPrior=t.forecast-num(t.prior);t.remainingToForecast=t.forecast-num(t.real);});
  const board=qs("#content .forecast-board");if(board)board.outerHTML=cards(currentScopeSummary());updateDirtyBanner_();
 }
-document.addEventListener("input",e=>{if(!e.target.matches(".edit")||submitInFlight||contextChanging)return;const keys=String(e.target.dataset.rows||"").split(",").filter(Boolean),field=e.target.dataset.field,value=wbNormalizeMoneyInput_(e.target);wbApplyValue_(keys,field,value);e.target.classList.add("dirty");scheduleAutosave_(1000);const tr=e.target.closest("tr");if(tr){const vals=Object.fromEntries([...tr.querySelectorAll(".edit")].map(x=>[x.dataset.field,wbParseMoneyInput_(x.value)])),forecast=num(vals.fc)+num(vals.py)+num(vals.pa),total=tr.querySelector(".line-total"),growth=tr.querySelector(".line-growth");if(total)total.textContent=money(forecast);if(growth){const prior=num(growth.dataset.prior);growth.textContent=prior?FMT_DEC1.format((forecast/prior-1)*100)+"%":(forecast?"Nuevo":"—");}}});
-document.addEventListener("focusout",e=>{if(e.target.matches(".edit")&&!submitInFlight&&pendingWorking.size)scheduleAutosave_(0);});
+document.addEventListener("input",e=>{if(!e.target.matches(".edit")||submitInFlight||contextChanging)return;const keys=String(e.target.dataset.rows||"").split(",").filter(Boolean),field=e.target.dataset.field,value=wbNormalizeMoneyInput_(e.target);if(e.target.dataset?.wb2Missing!==undefined){wb2MissingInput_(e.target,value);return;}wbApplyValue_(keys,field,value);e.target.classList.add("dirty");scheduleAutosave_(1000);const tr=e.target.closest("tr");if(tr){const vals=Object.fromEntries([...tr.querySelectorAll(".edit")].map(x=>[x.dataset.field,wbParseMoneyInput_(x.value)])),forecast=num(vals.fc)+num(vals.py)+num(vals.pa),total=tr.querySelector(".line-total"),growth=tr.querySelector(".line-growth");if(total)total.textContent=money(forecast);if(growth){const prior=num(growth.dataset.prior);growth.textContent=prior?FMT_DEC1.format((forecast/prior-1)*100)+"%":(forecast?"Nuevo":"—");}}});
+document.addEventListener("focusout",e=>{if(e.target.matches(".edit")&&!submitInFlight&&(pendingWorking.size||wb2MissingEdits.size))scheduleAutosave_(0);});
 document.addEventListener("click",e=>{if(submitInFlight){e.preventDefault();e.stopImmediatePropagation();}},true);
-window.addEventListener("beforeunload",e=>{if(pendingWorking.size||autosaveInFlight||submitInFlight){e.preventDefault();e.returnValue="";}});
+window.addEventListener("beforeunload",e=>{if(pendingWorking.size||wb2MissingEdits.size||autosaveInFlight||submitInFlight){e.preventDefault();e.returnValue="";}});
 
 document.addEventListener("click",e=>{const wbNegotiation=e.target.closest(".wb-neg-line");if(wbNegotiation){negEditFromWorkbench_(wbNegotiation.dataset.rows);return;}const neg=e.target.closest(".neg-client-create");if(neg){negCreateLabel_(neg.dataset.clientId);return;}const importReal=e.target.closest(".import-real-fc");if(importReal){importRealToForecast_(importReal.dataset.ei,importReal.dataset.ci,importReal.dataset.ri);return}const addLine=e.target.closest(".add-line-raw");if(addLine){addLineFromRaw_(addLine.dataset.ei,addLine.dataset.ci,addLine.dataset.ri);return}const more=e.target.closest(".view-more");if(more){expandView_(more.dataset.viewMore);return}const t=e.target.closest(".wb-toggle");if(t){const row=qs("#"+t.dataset.target);if(row){if(row.hidden&&!row.dataset.loaded){const h=d.workbenchHierarchy||{executives:[]},year=h.priorYear||Number(String(d.period||"").slice(0,4))-1,ei=Number(row.dataset.ei),ci=Number(row.dataset.ci),ri=Number(row.dataset.ri),ex=h.executives?.[ei],client=ex?.clients?.[ci],raw=client?.rawClients?.[ri];if(row.dataset.wbLevel==="exec")row.innerHTML=workbenchUnifiedTable(ex?.clients||[],year,ei);else if(row.dataset.wbLevel==="client")row.innerHTML=workbenchRawTable(client?.rawClients||[],year,ei,ci);else if(row.dataset.wbLevel==="raw")row.innerHTML=workbenchLineTable(raw?.lines||[],year);row.dataset.loaded="1"}row.hidden=!row.hidden;t.textContent=row.hidden?"▸":"▾"}return}if(e.target.id==="addClient")addClient();if(e.target.id==="saveForecast")saveDraft();if(e.target.id==="submitStage")reviewSubmit();});
 function catalogValues_(values,defaults){
@@ -1221,7 +1272,7 @@ function openClientIdentityPicker_(){
  });
 }
 async function addClient(){
- if(savingDraft||submitInFlight||autosaveInFlight||pendingWorking.size)return showNotice("Guarda los cambios pendientes antes de agregar un cliente.");
+ if(savingDraft||submitInFlight||autosaveInFlight||pendingWorking.size||wb2MissingEdits.size)return showNotice("Guarda los cambios pendientes antes de agregar un cliente.");
  if(d.demo)return showNotice("DEMO: agregar cliente no modifica datos reales.");if(!d.stageEditable)return showNotice("La Mesa de este mes está cerrada y no permite agregar clientes.");
  const identity=await openClientIdentityPicker_();if(!identity)return;
  const catalogs=d.lineCatalogs||{},executives=(d.teamExecutives||[]).map(x=>({value:x.code,label:x.code+(x.name?" · "+x.name:"")})),mediums=catalogValues_(catalogs.mediums,["Radio","Digital"]),fields=[];
@@ -1233,7 +1284,7 @@ async function addClient(){
  try{await refreshWorkbenchAfterAdd_(identity.existing?"Cliente existente agregado sin crear una identidad nueva.":"Nuevo Cliente Real creado y agregado.");}catch(e){showNotice("El cliente sí se agregó, pero no fue posible actualizar la vista automáticamente: "+e.message)}
 }
 async function addLineFromRaw_(ei,ci,ri,originRowKey,contextual){
- if(savingDraft||submitInFlight||autosaveInFlight||pendingWorking.size||contextChanging)return showNotice("Guarda los cambios pendientes antes de agregar una línea.");
+ if(savingDraft||submitInFlight||autosaveInFlight||pendingWorking.size||wb2MissingEdits.size||contextChanging)return showNotice("Guarda los cambios pendientes antes de agregar una línea.");
  if(d.demo)return showNotice("DEMO: agregar línea no modifica datos reales.");if(!d.stageEditable||d.role!=="ld")return showNotice("La Mesa o tu perfil no permite agregar líneas.");
  const h=d.workbenchHierarchy||{executives:[]},ex=h.executives?.[Number(ei)],client=ex?.clients?.[Number(ci)],raw=client?.rawClients?.[Number(ri)];if(!ex||!client||!raw)return showNotice("No se encontró el Cliente Real.");
  const isContext=Boolean(contextual),period=d.period,stage=d.stage;
@@ -1252,7 +1303,7 @@ async function addLineFromRaw_(ei,ci,ri,originRowKey,contextual){
    catalogField_("negotiation","Negociación",catalogs.negotiations,{full:true})
   ]});if(!form)return;
  }
- if(period!==d.period||stage!==d.stage||!d.stageEditable||d.role!=="ld"||savingDraft||submitInFlight||autosaveInFlight||pendingWorking.size||contextChanging)return showNotice("Cambió la Mesa o hay cambios pendientes; no se creó ninguna línea.");
+ if(period!==d.period||stage!==d.stage||!d.stageEditable||d.role!=="ld"||savingDraft||submitInFlight||autosaveInFlight||pendingWorking.size||wb2MissingEdits.size||contextChanging)return showNotice("Cambió la Mesa o hay cambios pendientes; no se creó ninguna línea.");
  if(isContext&&(!wb2GroupRows_(contextual.group).some(x=>x.key===r.key)||wb2GroupRows_(contextual.group).some(x=>wb2Medium_(x.medium)===contextual.medium)))return showNotice("La combinación ya cambió; recarga antes de crear.");
  const x=await gasPost("addWorkingClient",{period:d.period,stage:d.stage,inheritRowKey:(originRowKey&&raw.lines?.some(line=>(line.rowKeys||[]).map(String).includes(String(originRowKey))))?String(originRowKey):raw.lines?.[0]?.rowKeys?.[0]||"",clientRealId:isContext?r.clientRealId||"":undefined,clientName:client.unified||raw.rawName,rawName:raw.rawName,executiveCode:(String(ex.executive||"")==="SIN EJECUTIVO"?"":ex.executive||""),negotiation:String(form.negotiation||"").trim(),medium:String(form.medium||"").trim(),holding:String(form.holding||"").trim()});if(!x.ok)return showNotice("No se pudo agregar la línea: "+(x.error||"error"));
  try{await refreshWorkbenchAfterAdd_("Nueva línea agregada a "+String(raw.rawName||"Cliente Real")+".");if(isContext){const group=wb2GroupRows_(contextual.group);if(group.some(y=>y.key===String(x.rowKey)&&wb2Medium_(y.medium)===contextual.medium)){const el=[...document.querySelectorAll(".wb2-client")].find(n=>n.dataset.wb2Group===contextual.group);el?.querySelector('td[data-wb2-f="fc"][data-wb2-m="'+contextual.medium+'"] input.edit')?.focus();}else showNotice("La línea fue creada, pero no aparece en esta combinación: revisa los filtros y recarga antes de registrar importes.");}}catch(e){showNotice("La línea sí se agregó, pero no fue posible actualizar la vista automáticamente: "+e.message)}
@@ -1280,7 +1331,7 @@ function restoreWorkbenchUiState_(state){
 function waitMs_(ms){return new Promise(resolve=>setTimeout(resolve,ms))}
 function scheduleAutosave_(delay=1000){
  if(autosaveTimer){clearTimeout(autosaveTimer);autosaveTimer=null;}
- if(d.demo||!d.stageEditable||!pendingWorking.size||submitInFlight||removedWorking.size||autosaveFailures>=3)return;
+ if(d.demo||!d.stageEditable||(!pendingWorking.size&&!wb2MissingEdits.size)||submitInFlight||removedWorking.size||autosaveFailures>=3)return;
  if(autosaveInFlight){autosaveQueued=true;autosaveDueAt=Date.now()+delay;return;}
  autosaveDueAt=Date.now()+delay;
  const wait=Math.max(0,delay,retryAt-Date.now());
@@ -1302,9 +1353,32 @@ async function reconcileStaleSave_(uiState,period,stage){
 async function flushWorking_(mode="auto"){
  if(autosaveTimer){clearTimeout(autosaveTimer);autosaveTimer=null;}
  if(mode==="manual"){autosaveFailures=0;retryAt=0;}
- if(autosaveInFlight){await autosaveInFlight;if(pendingWorking.size)return flushWorking_(mode);return {ok:true,saved:0,joined:true};}
+ if(autosaveInFlight){await autosaveInFlight;if(pendingWorking.size||wb2MissingEdits.size)return flushWorking_(mode);return {ok:true,saved:0,joined:true};}
  if(d.demo){pendingWorking.clear();workingRevision.clear();clearSavedDirty_();updateDirtyBanner_();return {ok:true,saved:0,demo:true};}
- if(!pendingWorking.size){updateDirtyBanner_();return {ok:true,saved:0};}
+ if(!pendingWorking.size&&!wb2MissingEdits.size){updateDirtyBanner_();return {ok:true,saved:0};}
+
+ if(wb2MissingEdits.size){
+  const context=[d.period,d.stage,d.teamId],state=captureWorkbenchUiState_(),items=[...wb2MissingEdits.values()].map(x=>({...x,values:{...x.values}}));
+  autosaveInFlight=Promise.resolve().then(async()=>{
+   for(const item of items){
+    if([d.period,d.stage,d.teamId].some((v,i)=>v!==context[i])||d.role!=="ld"||!d.stageEditable)throw new Error("Contexto o permisos cambiaron");
+    const sources=wb2GroupRows_(item.group);
+    if(!sources.some(r=>r.key===item.originRowKey)||sources.some(r=>wb2Medium_(r.medium)===item.medium))throw new Error("La identidad del medio cambió");
+    const requestId=item.requestId||(window.crypto?.randomUUID?.()||Date.now().toString(36)+"-"+Math.random().toString(36).slice(2));
+    if(wb2MissingEdits.get(item.key)?.revision===item.revision)wb2MissingEdits.get(item.key).requestId=requestId;
+    const result=await gasPost("saveMissingMedium",{period:item.period,stage:item.stage,originRowKey:item.originRowKey,medium:item.medium,values:item.values,requestId});
+    if(!result.ok)throw new Error(result.error||"No guardado");
+    if(wb2MissingEdits.get(item.key)?.revision===item.revision)wb2MissingEdits.delete(item.key);
+   }
+   if(!wb2MissingEdits.size&&!pendingWorking.size&&d.period===context[0]&&d.stage===context[1]&&d.teamId===context[2])await refreshWorkbenchAfterSave_(state);
+   editGeneration++;delete d.previousOfficial;invalidateViews_([...commercialViews_(),"Histórico","Auditoría"]);return {ok:true,saved:items.length};
+  });
+  let failure=false;
+  try{await autosaveInFlight;}catch(e){failure=true;autosaveError=String(e&&e.message||e);autosaveFailures++;retryAt=Date.now()+Math.min(30000,5000*2**(autosaveFailures-1));if(mode==="manual")showNotice("No guardado: "+autosaveError);throw e;}
+  finally{autosaveInFlight=null;updateDirtyBanner_();if(wb2MissingEdits.size)scheduleAutosave_(failure?5000:1000);}
+  if(wb2MissingEdits.size)return {ok:true,saved:0,queued:true};
+  if(!pendingWorking.size)return {ok:true,saved:items.length};
+ }
  const period=d.period,stage=d.stage,uiState=captureWorkbenchUiState_();
  const keys=[...pendingWorking].filter(k=>!removedWorking.has(k)),revisions=new Map(keys.map(k=>[k,workingRevision.get(k)||0]));
  const rows=keys.map(k=>workingIndex.get(k)).filter(Boolean).map(x=>({row_key:x.row_key||x.rowKey,team_id:x.team_id||x.teamId||"",fc:num(x.fc),py:num(x.py),pa:num(x.pa),pl:num(x.pl)}));
@@ -1329,14 +1403,14 @@ async function flushWorking_(mode="auto"){
  updateDirtyBanner_();let failed=false;
  try{const r=await autosaveInFlight;return r;}
  catch(e){failed=true;autosaveError=String(e&&e.message||e);autosaveFailures++;retryAt=Date.now()+Math.min(30000,5000*2**(autosaveFailures-1));if(mode==="manual")showNotice("No guardado: "+autosaveError);throw e;}
- finally{autosaveInFlight=null;const delay=autosaveQueued?Math.max(0,autosaveDueAt-Date.now()):1000;autosaveQueued=false;updateDirtyBanner_();if(pendingWorking.size)scheduleAutosave_(failed?5000:delay);}
+ finally{autosaveInFlight=null;const delay=autosaveQueued?Math.max(0,autosaveDueAt-Date.now()):1000;autosaveQueued=false;updateDirtyBanner_();if(pendingWorking.size||wb2MissingEdits.size)scheduleAutosave_(failed?5000:delay);}
 }
 async function saveDraft(){
  const savedScroll=window.scrollY||0;
- if(!pendingWorking.size&&!autosaveInFlight)return showNotice("Todo está guardado.");
+ if(!pendingWorking.size&&!wb2MissingEdits.size&&!autosaveInFlight)return showNotice("Todo está guardado.");
  try{
   if(removedWorking.size){if(!portfolioRecovery)portfolioRecovery=reconcileStaleSave_({},d.period,d.stage).finally(()=>{portfolioRecovery=null});await portfolioRecovery;}
-  await flushWorking_("manual");if(pendingWorking.size)await flushWorking_("manual");if(!pendingWorking.size){showNotice("Forecast guardado.");requestAnimationFrame(()=>requestAnimationFrame(()=>window.scrollTo({top:savedScroll,left:0,behavior:"auto"})));}}catch(e){updateDirtyBanner_();}
+  await flushWorking_("manual");if(pendingWorking.size)await flushWorking_("manual");if(!pendingWorking.size&&!wb2MissingEdits.size){showNotice("Forecast guardado.");requestAnimationFrame(()=>requestAnimationFrame(()=>window.scrollTo({top:savedScroll,left:0,behavior:"auto"})));}}catch(e){updateDirtyBanner_();}
 }
 // Add-client refresh is isolated from normal save (which makes no dashboard reads).
 async function refreshWorkbenchAfterSave_(uiState){
@@ -1386,16 +1460,16 @@ function cachedMegaPayload_(role,team){
  return [...contextPayloadCache.values()].reverse().map(x=>x).find(entry=>entry&&now-entry.at<=120000&&entry.payload?.role===role&&(entry.payload?.teamId||null)===(wantedTeam||null)&&entry.payload?.viewLoaded===first)?.payload||null;
 }
 async function switchMega(role,team){
- if(pendingWorking.size||autosaveInFlight||submitInFlight)return switchMegaImpl_(role,team);
+ if(pendingWorking.size||wb2MissingEdits.size||autosaveInFlight||submitInFlight)return switchMegaImpl_(role,team);
  contextLoads++;contextChanging=true;document.querySelectorAll(".edit").forEach(el=>el.disabled=true);
  try{return await switchMegaImpl_(role,team);}
  finally{contextLoads--;contextChanging=contextLoads>0;document.querySelectorAll(".edit").forEach(el=>el.disabled=contextChanging);}
 }
 async function switchMegaImpl_(role,team){
- if(savingDraft||submitInFlight||autosaveInFlight||pendingWorking.size){showNotice("Guarda los cambios pendientes antes de cambiar el contexto.");syncHeaderContext(d);return;}
+ if(savingDraft||submitInFlight||autosaveInFlight||pendingWorking.size||wb2MissingEdits.size){showNotice("Guarda los cambios pendientes antes de cambiar el contexto.");syncHeaderContext(d);return;}
  const wantedTeam=["ld","vw"].includes(role)?team:null;assumed={asRole:role};if(wantedTeam)assumed.asTeam=wantedTeam;
  const cached=cachedMegaPayload_(role,wantedTeam);
- if(cached){d=cached;indexWorking_();clearViewCache_(true);if(cached.viewLoaded)loadedViews.add(viewKey_(cached.viewLoaded,cached.period,cached.stage,""));currentView="";draw();prefetchViews_();gasGet("dashboard",{view:"AUTO"},false).then(x=>{if(!x.ok||savingDraft||pendingWorking.size||assumed.asRole!==role||(assumed.asTeam||null)!==(wantedTeam||null))return;d=x;indexWorking_();clearViewCache_(true);if(x.viewLoaded){loadedViews.add(viewKey_(x.viewLoaded,x.period,x.stage,""));rememberContextPayload_(x.viewLoaded,x)}currentView="";draw();prefetchViews_()}).catch(()=>{});return}
+ if(cached){d=cached;indexWorking_();clearViewCache_(true);if(cached.viewLoaded)loadedViews.add(viewKey_(cached.viewLoaded,cached.period,cached.stage,""));currentView="";draw();prefetchViews_();gasGet("dashboard",{view:"AUTO"},false).then(x=>{if(!x.ok||savingDraft||pendingWorking.size||wb2MissingEdits.size||assumed.asRole!==role||(assumed.asTeam||null)!==(wantedTeam||null))return;d=x;indexWorking_();clearViewCache_(true);if(x.viewLoaded){loadedViews.add(viewKey_(x.viewLoaded,x.period,x.stage,""));rememberContextPayload_(x.viewLoaded,x)}currentView="";draw();prefetchViews_()}).catch(()=>{});return}
  const x=await gasGet("dashboard",{view:"AUTO"});if(assumed.asRole!==role||(assumed.asTeam||null)!==(wantedTeam||null))return;if(!x.ok)return showNotice("No fue posible cambiar la vista: "+(x.error||"error"));
  d=x;indexWorking_();clearViewCache_(true);if(x.viewLoaded){loadedViews.add(viewKey_(x.viewLoaded,x.period,x.stage,""));rememberContextPayload_(x.viewLoaded,x)}currentView="";draw();prefetchViews_();
 }
@@ -1414,7 +1488,7 @@ function submissionDeltaHtml_(summary){
 
 async function reviewSubmit(){
  if(savingDraft)return showNotice("Espera a que termine el guardado actual.");
- if(autosaveInFlight||pendingWorking.size){try{await flushWorking_("manual");}catch(e){return showNotice("No se puede enviar la etapa porque hay cambios sin guardar.");}if(pendingWorking.size)return showNotice("No se puede enviar la etapa porque aún hay cambios pendientes.");}
+ if(autosaveInFlight||pendingWorking.size||wb2MissingEdits.size){try{await flushWorking_("manual");}catch(e){return showNotice("No se puede enviar la etapa porque hay cambios sin guardar.");}if(pendingWorking.size||wb2MissingEdits.size)return showNotice("No se puede enviar la etapa porque aún hay cambios pendientes.");}
  const refreshed=await gasGet("dashboard",{period:d.period,stage:d.stage,view:"Mesa de trabajo"},false);if(!refreshed.ok)return showNotice("No fue posible consultar las etapas abiertas: "+(refreshed.error||"error"));mergeDashboardData_(refreshed);
  const open=(d.openSubmissionStages||[]).filter(x=>["OPEN","REOPENED"].includes(String(x.state||"")));if(!open.length)return showNotice("No hay etapas abiertas disponibles para enviar en este mes.");
  const choice=await openSferaForm({title:"¿Qué etapa quieres enviar?",subtitle:"La Mesa Viva seguirá siendo la misma. Selecciona la fotografía oficial que quieres publicar.",submitLabel:"Continuar",fields:[{name:"stage",label:"Etapa abierta",type:"select",required:true,value:open.some(x=>x.stage===d.stage)?d.stage:open[0].stage,options:open.map(x=>({value:x.stage,label:x.label+(x.hasSnapshot?" · ya enviada":"")}))}]});if(!choice)return;
@@ -1433,8 +1507,8 @@ async function confirmSubmit(targetStage){
  const context=[d.period,d.teamId].join("|");
  document.querySelectorAll(".edit").forEach(el=>el.disabled=true);
  try{
-  if(autosaveInFlight||pendingWorking.size)await flushWorking_("manual");
-  if(autosaveInFlight||pendingWorking.size)throw new Error("Aún hay cambios pendientes.");
+  if(autosaveInFlight||pendingWorking.size||wb2MissingEdits.size)await flushWorking_("manual");
+  if(autosaveInFlight||pendingWorking.size||wb2MissingEdits.size)throw new Error("Aún hay cambios pendientes.");
   if(context!==[d.period,d.teamId].join("|"))throw new Error("El contexto cambió durante la confirmación.");
   await performSubmit_(targetStage);
  }catch(e){showNotice("No se puede enviar la etapa: "+e.message);}
@@ -1452,7 +1526,7 @@ async function negCreateLabel_(clientId){if(!d.stageEditable&&!d.fullAccess)retu
 async function negEditFromWorkbench_(keys){
  if(!d.stageEditable)return showNotice("La Mesa está cerrada");
  const period=d.period;const arr=String(keys||"").split(",").filter(Boolean);if(!arr.length)return showNotice("Línea sin identidad");
- if(pendingWorking.size||autosaveInFlight){try{await flushWorking_("manual");}catch(e){return showNotice("Guarda primero los cambios pendientes");}}
+ if(pendingWorking.size||wb2MissingEdits.size||autosaveInFlight){try{await flushWorking_("manual");}catch(e){return showNotice("Guarda primero los cambios pendientes");}}
  let rowKey=arr[0];
  if(arr.length>1){const f=await openSferaForm({title:"Seleccionar línea de Forecast",subtitle:"Esta fila reúne varias líneas originales; selecciona la que recibirá la negociación.",fields:[{name:"rowKey",label:"Línea original",type:"select",required:true,value:arr[0],options:arr.map((value,i)=>({value,label:"Línea "+(i+1)+" · "+value.slice(0,10)}))}]});if(!f)return;rowKey=f.rowKey;}
  if(d.period!==period)return showNotice("El periodo cambió");
@@ -1601,7 +1675,7 @@ function assocWorkbenchSelection_(){
  const hierarchy=enabled?assocWorkbenchHierarchy_(d.workbenchHierarchy):null;
  if(enabled&&!hierarchy)return; // Defer the selection count until the commercial hierarchy exists.
  const note=document.createElement("div");note.className="assoc-workbench-note panel";note.textContent=enabled?"Selecciones activas: visibles "+num(hierarchy.assocVisible)+" líneas de "+num((d.working||[]).length)+" autorizadas. El Forecast y las líneas ocultas permanecen intactos. Las dimensiones sin atribución verificable no eliminan importes.":"Mesa de Trabajo: el periodo operativo y los valores pendientes de guardar no cambian con filtros analíticos.";
- if(assocAnalyticPeriod&&assocAnalyticPeriod!==mesaOperationalPeriod){const msg=document.createElement("span");msg.textContent=" · Mesa operativa "+mesaOperationalPeriod+" · período analítico "+assocAnalyticPeriod+".";note.appendChild(msg);const adopt=document.createElement("button");adopt.type="button";adopt.className="action";adopt.textContent="Adoptar período analítico en Mesa";adopt.onclick=()=>{if(pendingWorking.size||autosaveInFlight)return showNotice("Guarda cambios antes de adoptar otro periodo");changeTopContext_(assocAnalyticPeriod,"");};note.appendChild(adopt);}
+ if(assocAnalyticPeriod&&assocAnalyticPeriod!==mesaOperationalPeriod){const msg=document.createElement("span");msg.textContent=" · Mesa operativa "+mesaOperationalPeriod+" · período analítico "+assocAnalyticPeriod+".";note.appendChild(msg);const adopt=document.createElement("button");adopt.type="button";adopt.className="action";adopt.textContent="Adoptar período analítico en Mesa";adopt.onclick=()=>{if(pendingWorking.size||wb2MissingEdits.size||autosaveInFlight)return showNotice("Guarda cambios antes de adoptar otro periodo");changeTopContext_(assocAnalyticPeriod,"");};note.appendChild(adopt);}
  host.prepend(note);
 }
 
