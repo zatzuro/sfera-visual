@@ -32,6 +32,27 @@ export function testData(role="dr",team="NAC1"){
    py:money(4000000+i*500000),pa:money(1000000+i*250000),pl:money(2000000),
    diligenceStatus:i===1?"PENDING":"CONFIRMED"};
  });
+ // Deliberately visible TEST-only data for PR #95: two official source facts
+ // lacking editable WORKING lines. Without these, the KPI correction is invisible
+ // in SFERA Visual although the production frontend logic has changed.
+ const sourceResiduals=[
+  {key:"TEST-ONLY-"+team+"-CPD",teamId:team,clientId:"CPD",
+   clientRealId:"CR-CPD",unified:"CLIENTE POR DESARROLLAR TEST",
+   raw:"CLIENTE POR DESARROLLAR TEST",executiveId:"E-"+team,
+   executive:"Ejecutivo Simulado",medium:"Digital",
+   agency:"Agencia Inventada",holding:"Holding Ficticio",
+   negotiation:"",clientType:"",sourceOnly:true,
+   sourceReason:"CLIENTE_POR_DESARROLLAR",
+   real:7000000,budget:12000000,prior:0,fc:0,py:0,pa:0,pl:0},
+  {key:"TEST-ONLY-"+team+"-SIN-MEDIO",teamId:team,clientId:"CSM",
+   clientRealId:"CR-CSM",unified:"FUENTE SIN MEDIO TEST",
+   raw:"FUENTE SIN MEDIO TEST",executiveId:"E-"+team,
+   executive:"Ejecutivo Simulado",medium:"",
+   agency:"Agencia Inventada",holding:"Holding Ficticio",
+   negotiation:"",clientType:"",sourceOnly:true,
+   sourceReason:"SIN_LINEA_DE_TRABAJO",
+   real:5000000,budget:8000000,prior:0,fc:0,py:0,pa:0,pl:0}
+ ];
  const exec={executiveId:"E-"+team,executive:"Ejecutivo Simulado",
   totals:{real:working.reduce((s,x)=>s+x.real,0),budget:working.reduce((s,x)=>s+x.budget,0)},
   clients:working.map(w=>({clientId:w.clientId,unified:w.unified,clientType:w.clientType,
@@ -46,7 +67,7 @@ export function testData(role="dr",team="NAC1"){
   stageLabel:"Semana 2 · TEST",availableStages:["ARR","W1","W2","W3","PRE","LATEST"],
   stageEditable:role==="ld",stageState:"OPEN",stageStates:TEST_TEAMS.map(teamId=>({teamId,stage:"W2",state:"OPEN"})),
   working,previousOfficial:working.map(w=>({...w,fc:w.fc-1500000})),
-  workbenchHierarchy:{priorYear:2025,executives:[exec]},
+  workbenchHierarchy:{priorYear:2025,executives:[exec],sourceResiduals},
   summary:{teams:selected,national:overall},
   deliveries:TEST_TEAMS.map((teamId,i)=>({teamId,stage:i%2?"W1":"W2",state:i%2?"SUBMITTED":"OPEN",delivery:i%2?"A TIEMPO":"PENDIENTE",dueAt:"2026-10-30"})),
   history:TEST_TEAMS.map((teamId,i)=>({teamId,stage:"W1",version:1,submittedAt:"2026-10-12 08:00",forecast:all[i].forecast})),
