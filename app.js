@@ -1482,7 +1482,7 @@ function submissionDeltaSummary_(loaded,deltas){
  return {forecast,direction,refLabel,rubros,headline};
 }
 function submissionDeltaHtml_(summary){
- const items=summary.rubros.length?summary.rubros.map(x=>'<div><span>'+esc(x.label)+'</span><b>'+signed(x.value)+'</b></div>').join(""):'<div><span>Rubros</span><b>Sin cambios</b></div>';
+ const items=summary.rubros.length?summary.rubros.map(x=>'<div><span>'+esc(x.label)+'</span><b>'+signed(x.value)+'</b></div>').join(""):'<div><span>Rubros</span><b>'+(summary.refLabel==='sin referencia previa'?'No aplica':'Sin cambios')+'</b></div>';
  return '<div class="notice"><b>'+esc(summary.headline)+'</b><br>'+(summary.rubros.length?'Rubros que explican el movimiento ordenados por impacto.':(summary.refLabel==='sin referencia previa'?'No existe una fotografía oficial previa del mes para comparar.':'No hay variación frente a la referencia oficial seleccionada.'))+'</div><div class="confirm-metrics">'+items+'</div>';
 }
 
@@ -1499,7 +1499,7 @@ async function reviewSubmit(){
  for(const r of prev){if(seen.has(r.rowKey))continue;fc-=num(r.fc);py-=num(r.py);pa-=num(r.pa);pl-=num(r.pl)}
  const label=target.label||targetStage,replacing=Boolean(loaded.targetSnapshotExists||target.hasSnapshot),summary=submissionDeltaSummary_(loaded,{fc,py,pa,pl});
  if(d.demo)return showNotice("Revisión "+label+": "+summary.headline+" "+summary.rubros.map(x=>x.label+" "+signed(x.value)).join(" | ")+". DEMO: no crea snapshot.");
- const comparisonText=loaded.comparisonReference?.kind==="SAME_STAGE_PREVIOUS_VERSION"?"Esta nueva versión se compara contra la versión oficial anterior de la misma etapa.":loaded.comparisonReference?.kind==="PREVIOUS_STAGE"?"Esta etapa se compara contra la última etapa oficial anterior del mismo mes.":"No existe una etapa oficial anterior para comparar.";
+ const comparisonText=loaded.comparisonReference?.kind==="SAME_STAGE_PREVIOUS_VERSION"?"Esta nueva versión se compara contra la versión oficial anterior de la misma etapa.":loaded.comparisonReference?.kind==="PREVIOUS_STAGE"?"Esta etapa se compara contra la última etapa oficial anterior del mismo mes.":"Primera fotografía oficial sin referencia anterior; los valores actuales no constituyen una variación.";
  const ok=await openSferaConfirm({title:(replacing?"Reemplazar ":"Publicar ")+label,subtitle:summary.headline,confirmLabel:replacing?("Reemplazar "+label):"Publicar etapa",note:comparisonText+" "+(replacing?("El estado actual reemplazará el "+label+" publicado y actualizará el histórico de evolución del Forecast."):"La Mesa Viva continuará activa después del envío."),html:submissionDeltaHtml_(summary)});if(ok)confirmSubmit(targetStage);
 }
 async function confirmSubmit(targetStage){
